@@ -2,13 +2,8 @@ import requests
 from bs4 import BeautifulSoup
 import re
 
-# Headers per simulare un browser reale ed evitare il blocco di Amazon
 HEADERS = {
-    "User-Agent": (
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/124.0.0.0 Safari/537.36"
-    ),
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
     "Accept-Language": "it-IT,it;q=0.9,en-US;q=0.8",
     "Accept-Encoding": "gzip, deflate, br",
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
@@ -17,68 +12,68 @@ HEADERS = {
     "Upgrade-Insecure-Requests": "1",
 }
 
+def pulisci_prezzo(testo):
+    testo = testo.replace("€", "").replace(" ", "").replace("\xa0", "").strip()
+    if "," in testo:
+        testo = testo.replace(".", "").replace(",", ".")
+    elif "." in testo and len(testo.split(".")[-1]) == 3:
+        testo = testo.replace(".", "")
+    match = re.search(r"\d+\.?\d*", testo)
+    if match:
+        try:
+            valore = float(match.group())
+            return valore if valore > 0 else None
+        except ValueError:
+            return None
+    return None
+
 def ottieni_info_prodotto(url):
-    """Scarica la pagina Amazon e restituisce nome e prezzo del prodotto."""
     try:
         risposta = requests.get(url, headers=HEADERS, timeout=10)
-
         if risposta.status_code != 200:
-            print(f"Status code: {risposta.status_code}")
             return None
 
         soup = BeautifulSoup(risposta.content, "html.parser")
 
-        # --- Nome prodotto ---
         nome_el = soup.find("span", {"id": "productTitle"})
-        nome = nome_el.get_text().strip() if nome_el else "Prodotto sconosciuto"
-        nome = nome[:120]  # Tronca se troppo lungo
+        nome = nome_el.get_text().strip()[:120] if nome_el else "Prodotto sconosciuto"
 
-        # --- Prezzo ---
         prezzo = None
-        
-        # Diciamo al bot di cercare SOLO nei div principali del prezzo per evitare le rate
-        contenitori_prezzo = [
+
+        contenitori = [
             soup.find("div", {"id": "corePriceDisplay_desktop_feature_div"}),
             soup.find("div", {"id": "corePrice_feature_div"}),
             soup.find("div", {"id": "corePrice_desktop"}),
-            soup  # Fallback: cerca in tutta la pagina se non trova i div principali
         ]
 
-        for contenitore in contenitori_prezzo:
+        for contenitore in contenitori:
             if not contenitore:
                 continue
-                
-            # Cerchiamo prima la classe a-offscreen (solitamente ha il prezzo intero)
-            el_prezzo = contenitore.find("span", {"class": "a-offscreen"})
-            if not el_prezzo:
-                # Fallback sulla classe a-price-whole
-                el_prezzo = contenitore.find("span", {"class": "a-price-whole"})
-                
-            if el_prezzo:
-                testo = el_prezzo.get_text().strip()
-                # Pulisce simboli di valuta, spazi e formatta i numeri (es. "1.299,99€" → "1299.99")
-                testo = testo.replace("€", "").replace(" ", "")
-                testo = testo.replace(".", "").replace(",", ".")
-                
-                match = re.search(r"\d+\.?\d*", testo)
-                if match:
-                    try:
-                        prezzo = float(match.group())
-                        # Se ha trovato un prezzo reale (maggiore di 0), si ferma!
-                        if prezzo > 0:
-                            break
-                    except ValueError:
-                        continue
-            
-            # Se ha trovato il prezzo nel contenitore giusto, ferma il ciclo generale
-            if prezzo:
-                break
+            el = contenitore.find("span", {"class": "a-offscreen"})
+            if el:
+                prezzo = pulisci_prezzo(el.get_text())
+                if prezzo:
+                    break
+
+        if not prezzo:
+            for el in soup.find_all("span", {"class": "a-offscreen"}):
+                prezzo = pulisci_prezzo(el.get_text())
+                if prezzo:
+                    break
+
+        if not prezzo:
+            intero = soup.find("span", {"class": "a-price-whole"})
+            decimale = soup.find("span", {"class": "a-price-fraction"})
+            if intero:
+                try:
+                    i = intero.get_text().strip().replace(".", "").replace(",", "")
+                    d = decimale.get_text().strip() if decimale else "00"
+                    prezzo = float(f"{i}.{d}")
+                except ValueError:
+                    pass
 
         return {"nome": nome, "prezzo": prezzo}
 
-    except requests.RequestException as e:
-        print(f"Errore di rete: {e}")
-        return None
     except Exception as e:
-        print(f"Errore generico: {e}")
+        print(f"Errore: {e}")
         return None
