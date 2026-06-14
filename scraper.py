@@ -2,14 +2,20 @@ import requests
 from bs4 import BeautifulSoup
 import re
 
+session = requests.Session()
+
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-    "Accept-Language": "it-IT,it;q=0.9,en-US;q=0.8",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+    "Accept-Language": "it-IT,it;q=0.9,en-US;q=0.8,en;q=0.7",
     "Accept-Encoding": "gzip, deflate, br",
-    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-    "DNT": "1",
     "Connection": "keep-alive",
     "Upgrade-Insecure-Requests": "1",
+    "Sec-Fetch-Dest": "document",
+    "Sec-Fetch-Mode": "navigate",
+    "Sec-Fetch-Site": "none",
+    "Sec-Fetch-User": "?1",
+    "Cache-Control": "max-age=0",
 }
 
 def pulisci_prezzo(testo):
@@ -29,8 +35,13 @@ def pulisci_prezzo(testo):
 
 def ottieni_info_prodotto(url):
     try:
-        risposta = requests.get(url, headers=HEADERS, timeout=10)
+        risposta = session.get(url, headers=HEADERS, timeout=15)
         if risposta.status_code != 200:
+            print(f"Status: {risposta.status_code}")
+            return None
+
+        if "captcha" in risposta.text.lower():
+            print("Amazon ha rilevato il bot (CAPTCHA)")
             return None
 
         soup = BeautifulSoup(risposta.content, "html.parser")
@@ -40,26 +51,11 @@ def ottieni_info_prodotto(url):
 
         prezzo = None
 
-        contenitori = [
-            soup.find("div", {"id": "corePriceDisplay_desktop_feature_div"}),
-            soup.find("div", {"id": "corePrice_feature_div"}),
-            soup.find("div", {"id": "corePrice_desktop"}),
-        ]
-
-        for contenitore in contenitori:
-            if not contenitore:
-                continue
-            el = contenitore.find("span", {"class": "a-offscreen"})
-            if el:
-                prezzo = pulisci_prezzo(el.get_text())
-                if prezzo:
-                    break
-
-        if not prezzo:
-            for el in soup.find_all("span", {"class": "a-offscreen"}):
-                prezzo = pulisci_prezzo(el.get_text())
-                if prezzo:
-                    break
+        for el in soup.find_all("span", {"class": "a-offscreen"}):
+            p = pulisci_prezzo(el.get_text())
+            if p and p > 0:
+                prezzo = p
+                break
 
         if not prezzo:
             intero = soup.find("span", {"class": "a-price-whole"})
